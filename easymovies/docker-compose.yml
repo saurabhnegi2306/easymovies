@@ -1,7 +1,7 @@
 version: "3.9"
 services:
   easymovies:
-    build: .
+    image: easymovies:${IMAGE_TAG}
     container_name: easymovies
     restart: unless-stopped
     ports:
