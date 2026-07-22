@@ -54,7 +54,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                   cd EasyMovies
+                   cd easyMovies
                    docker build -t easymovies:${BUILD_NUMBER} -t easymovies:latest .
                 '''
             }
