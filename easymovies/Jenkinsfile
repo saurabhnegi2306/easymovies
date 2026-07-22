@@ -1,0 +1,97 @@
+pipeline {
+    agent {
+        label 'docker-worker'
+    }
+    environment {
+        IMAGE_NAME = "easymovies"
+        CONTAINER_NAME = "easymovies"
+    }
+    options {
+        timestamps()
+    }
+    stages {
+        stage('Checkout Source') {
+            steps {
+                echo "Checking out source code..."
+                checkout scm
+            }
+        }
+        stage('Show Environment') {
+            steps {
+                sh '''
+                    echo "===== Jenkins Environment ====="
+                    hostname
+                    whoami
+                    pwd
+                    docker --version
+                    docker compose version
+                '''
+            }
+        }
+        stage('Install Python Dependencies') {
+            steps {
+                sh '''
+                    python3 -m pip install --upgrade pip
+                    pip3 install -r requirements.txt
+                '''
+            }
+        }
+        stage('Run Unit Tests') {
+            steps {
+                sh '''
+                    pytest -v
+                '''
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                    docker compose build
+                '''
+            }
+        }
+        stage('Deploy Application') {
+            steps {
+                sh '''
+                    export BUILD_NUMBER=${BUILD_NUMBER}
+                    export GIT_COMMIT=${GIT_COMMIT}
+                    export BUILD_URL=${BUILD_URL}
+                    export BUILD_USER=${BUILD_USER_ID}
+                    export BUILD_TIME="$(date)"                
+                    docker compose up -d
+                '''
+            }
+        }
+        stage('Smoke Test') {
+            steps {
+                sh '''
+                    sleep 10
+                    curl -f http://localhost:8081
+                    echo "Application is running successfully."
+                '''
+            }
+        }
+        stage('Running Containers') {
+            steps {
+                sh '''
+                    docker ps
+                '''
+            }
+        }
+    }
+    post {
+        always {
+            echo "Cleaning up..."
+            sh '''
+                docker compose down
+                docker image prune -f
+            '''
+        }
+        success {
+            echo "Pipeline completed successfully."
+        }
+        failure {
+            echo "Pipeline failed."
+        }
+    }
+}

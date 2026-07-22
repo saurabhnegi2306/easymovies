@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">
+    🎥 Now Showing
+</h2>
+<div class="row">
+    {% for movie in movies %}
+    <div class="col-md-4 mb-4">
+        <div class="card shadow h-100">
+            <img src="https://picsum.photos/400/250?random={{ movie.id }}"
+                 class="card-img-top"
+                 alt="Movie">
+            <div class="card-body">
+                <h4 class="card-title">
+                    {{ movie.name }}
+                </h4>
+                <p class="text-muted">
+                    <strong>Theatre:</strong>
+                    {{ movie.theatre }}
+                </p>
+                <p>
+                    <strong>Available Seats:</strong>
+                    <span class="badge bg-success">
+                        {{ movie.available_seats }}
+                    </span>
+                </p>
+            </div>
+            <div class="card-footer bg-white border-0">
+                {% if movie.available_seats > 0 %}
+                <a href="/book/{{ movie.id }}"
+                   class="btn btn-primary w-100">
+                    Book Ticket
+                </a>
+                {% else %}
+                <button class="btn btn-secondary w-100" disabled>
+                    House Full
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+<hr>
+
+<div class="card mt-4 shadow-sm">
+    <div class="card-header bg-dark text-white">
+        🚀 Deployment Information
+    </div>
+    <div class="card-body">
+        <table class="table table-borderless">
+            <tr>
+                <th>Build Number</th>
+                <td>{{ build_info.build_number }}</td>
+            </tr>
+            <tr>
+                <th>Git Commit</th>
+                <td>{{ build_info.git_commit }}</td>
+            </tr>
+            <tr>
+                <th>Branch</th>
+                <td>{{ build_info.branch }}</td>
+            </tr>            
+            <tr>
+                <th>Builder</th>
+                <td>{{ build_info.builder }}</td>
+            </tr>
+            <tr>
+                <th>Build Time</th>
+                <td>{{ build_info.build_time }}</td>
+            </tr>
+            <tr>
+                <th>Jenkins Build</th>
+                <td>
+                {% if build_info.build_url %}
+                <a href="{{ build_info.build_url }}"
+                target="_blank"
+                class="btn btn-sm btn-success">
+                    View Jenkins Build
+                </a>
+                {% else %}
+                <span class="badge bg-secondary">Local Deployment</span>
+                {% endif %}
+                </td>
+            </tr>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,75 @@
+body {
+    background-color: #f4f6f9;
+}
+
+.navbar-brand {
+    font-size: 1.5rem;
+}
+
+.card {
+    border: none;
+    border-radius: 12px;
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 12px 24px rgba(0,0,0,.18);
+}
+
+.card-img-top {
+    height: 230px;
+    object-fit: cover;
+}
+
+.card-title {
+    font-weight: bold;
+}
+
+.btn {
+    border-radius: 8px;
+}
+
+.table {
+    background: white;
+}
+
+.table th {
+    text-align: center;
+}
+
+.table td {
+    vertical-align: middle;
+    text-align: center;
+}
+
+.badge {
+    font-size: 0.9rem;
+}
+
+footer {
+    margin-top: 60px;
+    border-top: 1px solid #ddd;
+}
+
+footer small {
+    font-size: 14px;
+}
+
+.alert {
+    border-radius: 10px;
+}
+
+input.form-control {
+    border-radius: 8px;
+}
+
+.card-header {
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+h2 {
+    font-weight: bold;
+    color: #343a40;
+}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2 class="mb-4">
+    📋 My Bookings
+</h2>
+
+{% if bookings|length == 0 %}
+
+<div class="alert alert-info">
+
+    <h5>No bookings found.</h5>
+
+    <p class="mb-0">
+        Book your first movie ticket!
+    </p>
+
+</div>
+
+<a href="/" class="btn btn-primary">
+    Browse Movies
+</a>
+
+{% else %}
+
+<div class="table-responsive">
+
+<table class="table table-bordered table-hover align-middle shadow">
+
+    <thead class="table-dark">
+
+        <tr>
+
+            <th>Booking ID</th>
+
+            <th>Movie</th>
+
+            <th>Theatre</th>
+
+            <th>Customer</th>
+
+            <th>Seats</th>
+
+            <th>Action</th>
+
+        </tr>
+
+    </thead>
+
+    <tbody>
+
+    {% for booking in bookings %}
+
+        <tr>
+
+            <td>{{ booking.id }}</td>
+
+            <td>{{ booking.name }}</td>
+
+            <td>{{ booking.theatre }}</td>
+
+            <td>{{ booking.customer }}</td>
+
+            <td>
+
+                <span class="badge bg-success">
+
+                    {{ booking.seats }}
+
+                </span>
+
+            </td>
+
+            <td>
+
+                <a href="/cancel/{{ booking.id }}"
+                   class="btn btn-danger btn-sm"
+                   onclick="return confirm('Cancel this booking?');">
+
+                    Cancel
+
+                </a>
+
+            </td>
+
+        </tr>
+
+    {% endfor %}
+
+    </tbody>
+
+</table>
+
+</div>
+
+<div class="mt-3">
+
+    <a href="/" class="btn btn-primary">
+
+        ← Book Another Movie
+
+    </a>
+
+</div>
+
+{% endif %}
+
+{% endblock %}

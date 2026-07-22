@@ -1,0 +1,318 @@
+---
+- name: Provision Jenkins controller and Docker worker
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files: [vars.yml]
+  tasks:
+    - name: Create directory for the generated deployment key
+      ansible.builtin.file:
+        path: "{{ key_directory }}"
+        state: directory
+        mode: '0700'
+
+    - name: Generate the Jenkins deployment SSH key pair
+      community.crypto.openssh_keypair:
+        path: "{{ generated_key_path }}"
+        type: rsa
+        size: 4096
+        mode: '0600'
+        regenerate: never
+
+    - name: Register generated public key as an EC2 key pair
+      amazon.aws.ec2_key:
+        name: "{{ generated_key_name }}"
+        region: "{{ aws_region }}"
+        key_material: "{{ lookup('ansible.builtin.file', generated_key_path + '.pub') }}"
+        state: present
+
+    - name: Find current Canonical Ubuntu 22.04 AMI
+      amazon.aws.ec2_ami_info:
+        region: "{{ aws_region }}"
+        owners: ['099720109477']
+        filters:
+          name: ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*
+          architecture: x86_64
+          root-device-type: ebs
+      register: ubuntu_amis
+
+    - name: Create restricted CI security group in the provided $vpc_id VPC
+      amazon.aws.ec2_security_group:
+        name: jenkins-ci-sg
+        description: Access for Jenkins controller and build worker
+        region: "{{ aws_region }}"
+        vpc_id: "{{ jenkins_vpc.vpc.id }}"
+        rules:
+          - proto: tcp
+            ports: [22]
+            cidr_ip: "{{ allowed_cidr }}"
+            rule_desc: Administration from trusted network
+          - proto: tcp
+            ports: [8080]
+            cidr_ip: "{{ allowed_cidr }}"
+            rule_desc: Jenkins UI from trusted network
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+      register: ci_sg
+
+    - name: Create Jenkins VPC
+      amazon.aws.ec2_vpc_net:
+        name: jenkins-ci-vpc
+        cidr_block: 10.0.0.0/16
+        region: "{{ aws_region }}"
+        dns_support: true
+        dns_hostnames: true
+        state: present
+      register: jenkins_vpc
+
+    - name: Create Internet Gateway
+      amazon.aws.ec2_vpc_igw:
+        region: "{{ aws_region }}"
+        vpc_id: "{{ jenkins_vpc.vpc.id }}"
+        state: present
+      register: igw
+
+    - name: Create Public Subnet
+      amazon.aws.ec2_vpc_subnet:
+        region: "{{ aws_region }}"
+        vpc_id: "{{ jenkins_vpc.vpc.id }}"
+        cidr: 10.0.1.0/24
+        az: "{{ aws_region }}a"
+        map_public: true
+        tags:
+          Name: jenkins-public-subnet
+        state: present
+      register: public_subnet
+
+    - name: Create Public Route Table
+      amazon.aws.ec2_vpc_route_table:
+        region: "{{ aws_region }}"
+        vpc_id: "{{ jenkins_vpc.vpc.id }}"
+        tags:
+          Name: jenkins-public-rt
+        subnets:
+          - "{{ public_subnet.subnet.id }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw.gateway_id }}"
+          
+    - name: Create IAM role for EC2
+      amazon.aws.iam_role:
+        name: AnsibleProvisionRole
+        assume_role_policy_document: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Service": "ec2.amazonaws.com"
+                },
+                "Action": "sts:AssumeRole"
+              }
+            ]
+          }
+        managed_policies:
+          - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+          - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+        state: present
+
+    - name: Create instance profile
+      amazon.aws.iam_instance_profile:
+        name: jenkins-ci-instance-profile
+        role: AnsibleProvisionRole
+        state: present
+
+    - name: Wait for IAM propagation
+      ansible.builtin.pause:
+        seconds: 15        
+
+    - name: Launch Jenkins controller in provided $vpc_public_subnet_id
+      amazon.aws.ec2_instance:
+        name: jenkins-ci-controller
+        region: "{{ aws_region }}"
+        key_name: "{{ generated_key_name }}"
+        instance_type: "{{ controller_instance_type }}"
+        vpc_subnet_id: "{{ public_subnet.subnet.id }}"
+        image_id: "{{ (ubuntu_amis.images | sort(attribute='creation_date', reverse=true) | first).image_id }}"
+        iam_instance_profile: jenkins-ci-instance-profile
+        security_group: jenkins-ci-sg
+        network: { assign_public_ip: true }
+        wait: true
+        exact_count: 1
+        tags: { Name: jenkins-ci-controller, Role: jenkins-controller, ManagedBy: Ansible }
+      register: controller_ec2
+
+    - name: Launch Docker build worker in provided $vpc_public_subnet_id
+      amazon.aws.ec2_instance:
+        name: jenkins-ci-worker
+        region: "{{ aws_region }}"
+        key_name: "{{ generated_key_name }}"
+        instance_type: "{{ worker_instance_type }}"
+        vpc_subnet_id: "{{ public_subnet.subnet.id }}"
+        image_id: "{{ (ubuntu_amis.images | sort(attribute='creation_date', reverse=true) | first).image_id }}"
+        iam_instance_profile: jenkins-ci-instance-profile
+        security_group: jenkins-ci-sg
+        network: { assign_public_ip: true }
+        wait: true
+        exact_count: 1
+        tags: { Name: jenkins-ci-worker, Role: docker-worker, ManagedBy: Ansible }
+      register: worker_ec2
+
+    - name: Wait for SSH on Jenkins controller
+      ansible.builtin.wait_for:
+        host: "{{ controller_ec2.instances[0].public_ip_address }}"
+        port: 22
+        delay: 10
+        timeout: 300
+
+    - name: Wait for SSH on Docker worker
+      ansible.builtin.wait_for:
+        host: "{{ worker_ec2.instances[0].public_ip_address }}"
+        port: 22
+        delay: 10
+        timeout: 300
+    - debug:
+        var: controller_ec2.instances[0].public_ip_address
+
+    - debug:
+        var: worker_ec2.instances[0].public_ip_address
+    - name: Add controller and worker to this run
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: "{{ item.group }}"
+        ansible_host: "{{ item.address }}"
+        ansible_user: ubuntu
+        ansible_ssh_private_key_file: "{{ generated_key_path }}"
+      loop:
+        - { name: jenkins-controller, group: jenkins_controller, address: "{{ controller_ec2.instances[0].public_ip_address }}" }
+        - { name: jenkins-worker, group: jenkins_workers, address: "{{ worker_ec2.instances[0].public_ip_address }}" }
+
+    - name: Display Jenkins controller URL
+      ansible.builtin.debug:
+        msg: "Jenkins URL: http://{{ controller_ec2.instances[0].public_ip_address }}:8080; worker SSH host: {{ worker_ec2.instances[0].private_ip_address }}"
+
+    - name: Generate dynamic inventory file
+      ansible.builtin.copy:
+        dest: ./inventory.ini
+        mode: "0644"
+        content: |
+          [jenkins_controller]
+          jenkins-controller ansible_host={{ controller_ec2.instances[0].public_ip_address }} ansible_user=ubuntu ansible_ssh_private_key_file={{ generated_key_path }}
+
+          [jenkins_workers]
+          jenkins-worker ansible_host={{ worker_ec2.instances[0].public_ip_address }} ansible_user=ubuntu ansible_ssh_private_key_file={{ generated_key_path }}
+
+- name: Configure Jenkins controller
+  hosts: jenkins_controller
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - fontconfig
+          - openjdk-21-jre
+        state: present
+
+    - name: Create apt keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download Jenkins repository key
+      ansible.builtin.get_url:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
+        dest: /etc/apt/keyrings/jenkins-keyring.asc
+        mode: "0644"
+
+    - name: Add Jenkins repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/"
+        filename: jenkins
+        state: present
+
+    - name: Update apt cache after adding Jenkins repository
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install Jenkins
+      ansible.builtin.apt:
+        name: jenkins
+        state: present
+
+    - name: Reset failed Jenkins service
+      ansible.builtin.command: systemctl reset-failed jenkins
+      changed_when: false
+      failed_when: false
+
+    - name: Enable and start Jenkins
+      ansible.builtin.systemd:
+        name: jenkins
+        enabled: yes
+        state: started
+
+    - name: Wait until Jenkins is listening
+      ansible.builtin.wait_for:
+        port: 8080
+        timeout: 300
+
+    - name: Create Jenkins SSH directory
+      ansible.builtin.file:
+        path: /var/lib/jenkins/.ssh
+        state: directory
+        owner: jenkins
+        group: jenkins
+        mode: "0700"
+
+    - name: Copy worker private key
+      ansible.builtin.copy:
+        src: "{{ generated_key_path }}"
+        dest: /var/lib/jenkins/.ssh/jenkins-ci-worker.pem
+        owner: jenkins
+        group: jenkins
+        mode: "0600"
+
+    - name: Restart Jenkins
+      ansible.builtin.systemd:
+        name: jenkins
+        state: restarted
+
+
+- name: Configure Docker build worker
+  hosts: jenkins_workers
+  become: true
+  gather_facts: false  
+  tasks:
+    - ansible.builtin.wait_for_connection:
+    - name: Install Docker build dependencies
+      ansible.builtin.apt:
+        update_cache: yes
+        name:
+          - ca-certificates
+          - curl
+          - docker.io
+          - docker-compose-plugin
+          - git
+        state: present
+    - name: Enable Docker
+      ansible.builtin.service: { name: docker, state: started, enabled: true }
+    - name: Allow the Jenkins SSH user to run Docker
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: true

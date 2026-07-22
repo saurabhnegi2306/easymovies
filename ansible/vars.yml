@@ -1,0 +1,15 @@
+---
+aws_region: us-east-1
+vpc_id: vpc-08756e80aeb8cd620
+vpc_public_subnet_id: subnet-0c9a24d2f0119f706
+allowed_cidr: 0.0.0.0/0
+controller_instance_type: t3.micro
+worker_instance_type: t3.micro
+generated_key_name: jenkins-ci-generated-key
+key_directory: "{{ lookup('env', 'HOME') }}/.ssh"
+generated_key_path: "{{ key_directory }}/jenkins-ci-generated-key"
+deprecation_warnings: false
+
+jenkins_admin_user: admin
+jenkins_admin_password: 8572d4ddbfcd43a4883308764a68186e
+

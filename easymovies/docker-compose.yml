@@ -1,0 +1,21 @@
+version: "3.9"
+services:
+  easymovies:
+    build: .
+    container_name: easymovies
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - movie_db:/app/data
+    environment:
+      DB_NAME: /app/data/easymovies.db
+      BUILD_NUMBER: ${BUILD_NUMBER}
+      GIT_COMMIT: ${GIT_COMMIT}
+      GIT_BRANCH: ${GIT_BRANCH}
+      BUILD_URL: ${BUILD_URL}
+      BUILD_USER: ${BUILD_USER}
+      BUILD_TIME: ${BUILD_TIME}
+      
+volumes:
+  movie_db:

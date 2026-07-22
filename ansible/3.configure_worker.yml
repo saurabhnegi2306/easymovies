@@ -1,0 +1,207 @@
+---
+- name: Discover Jenkins controller and Docker worker
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files: [vars.yml]
+  tasks:
+    - name: Find running Jenkins instances by role
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:ManagedBy": Ansible
+          instance-state-name: running
+      register: ci_instances
+    - name: Select controller and worker
+      ansible.builtin.set_fact:
+        controller_instance: "{{ ci_instances.instances | selectattr('tags.Role', 'equalto', 'jenkins-controller') | list }}"
+        worker_instance: "{{ ci_instances.instances | selectattr('tags.Role', 'equalto', 'docker-worker') | list }}"
+    - name: Verify controller and worker were found
+      ansible.builtin.assert:
+        that: [controller_instance | length == 1, worker_instance | length == 1]
+        fail_msg: "Expected one running controller and one running Docker worker tagged ManagedBy=Ansible."
+    - name: Add instances to this run
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: "{{ item.group }}"
+        ansible_host: "{{ item.address }}"
+        ansible_user: ubuntu
+        ansible_ssh_private_key_file: "{{ generated_key_path }}"
+        jenkins_worker_private_ip: "{{ worker_instance[0].private_ip_address }}"
+      loop:
+        - { name: jenkins-controller, group: jenkins_controller, address: "{{ controller_instance[0].public_ip_address }}" }
+        - { name: jenkins-worker, group: jenkins_workers, address: "{{ worker_instance[0].public_ip_address }}" }
+
+- name: Prepare Docker worker for Jenkins SSH agent
+  hosts: jenkins_workers
+  vars_files: [vars.yml]  
+  become: true
+  tasks:
+    - name: Install Java required by Jenkins agents
+      ansible.builtin.apt:
+        update_cache: true
+        name: openjdk-21-jre-headless
+        state: present
+    - name: Create agent workspace directory
+      ansible.builtin.file:
+        path: /home/ubuntu/jenkins-agent
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+
+
+- name: Register Docker worker directly through Jenkins CLI
+  hosts: jenkins_controller
+  become: true
+  vars_files: [vars.yml]
+  vars:
+    jenkins_cli_path: /opt/jenkins-cli.jar
+    jenkins_auth_path: /root/.jenkins-cli-auth
+    worker_registration_script: /tmp/register-docker-worker.groovy
+  tasks:
+
+    - name: Ensure Jenkins SSH directory exists
+      ansible.builtin.file:
+        path: /var/lib/jenkins/.ssh
+        state: directory
+        owner: jenkins
+        group: jenkins
+        mode: "0700"
+
+    - name: Copy worker private key
+      ansible.builtin.copy:
+        src: "{{ generated_key_path }}"
+        dest: /var/lib/jenkins/.ssh/jenkins-ci-worker.pem
+        owner: jenkins
+        group: jenkins
+        mode: "0600"
+      
+    - name: Download Jenkins CLI from the local controller
+      ansible.builtin.get_url:
+        url: http://localhost:8080/jnlpJars/jenkins-cli.jar
+        dest: "{{ jenkins_cli_path }}"
+        mode: '0644'
+    - name: Add worker SSH host key to Jenkins known_hosts
+      ansible.builtin.shell: |
+        set -o pipefail
+        install -d -m 0700 -o jenkins -g jenkins /var/lib/jenkins/.ssh
+        touch /var/lib/jenkins/.ssh/known_hosts
+        chown jenkins:jenkins /var/lib/jenkins/.ssh/known_hosts
+        if ! ssh-keygen -F "{{ jenkins_worker_private_ip }}" -f /var/lib/jenkins/.ssh/known_hosts >/dev/null; then
+          ssh-keyscan -H "{{ jenkins_worker_private_ip }}" >> /var/lib/jenkins/.ssh/known_hosts
+          chown jenkins:jenkins /var/lib/jenkins/.ssh/known_hosts
+        fi
+      args: { executable: /bin/bash }
+      changed_when: false
+    - name: Write worker registration script
+      ansible.builtin.copy:
+        dest: "{{ worker_registration_script }}"
+        mode: '0600'
+        content: |
+          import jenkins.model.Jenkins
+          import hudson.model.Node
+          import hudson.slaves.DumbSlave
+          import hudson.slaves.RetentionStrategy
+          import hudson.plugins.sshslaves.SSHLauncher
+          import hudson.plugins.sshslaves.verifiers.NonVerifyingKeyVerificationStrategy
+          import com.cloudbees.plugins.credentials.CredentialsProvider
+          import com.cloudbees.plugins.credentials.CredentialsScope
+          import com.cloudbees.plugins.credentials.SystemCredentialsProvider
+          import com.cloudbees.plugins.credentials.common.StandardCredentials
+          import com.cloudbees.plugins.credentials.domains.Domain
+          import com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey
+          import hudson.security.ACL
+          import java.util.Collections
+
+          def jenkins = Jenkins.get()
+          def credentialId = 'jenkins-worker-ssh'
+          def privateKey = new File('/var/lib/jenkins/.ssh/jenkins-ci-worker.pem').text
+          def credential = new BasicSSHUserPrivateKey(
+            CredentialsScope.SYSTEM, credentialId, 'ubuntu',
+            new BasicSSHUserPrivateKey.DirectEntryPrivateKeySource(privateKey),
+            null, 'SSH key for the Docker build worker')
+          def store = SystemCredentialsProvider.getInstance().getStore()
+          def oldCredential = CredentialsProvider.lookupCredentials(
+            StandardCredentials.class, jenkins, ACL.SYSTEM, Collections.emptyList()).find { it.id == credentialId }
+          if (oldCredential == null) {
+            store.addCredentials(Domain.global(), credential)
+          } else {
+            store.updateCredentials(Domain.global(), oldCredential, credential)
+          }
+          def nodeName = 'docker-worker'
+          def oldNode = jenkins.getNode(nodeName)
+          if (oldNode != null) { jenkins.removeNode(oldNode) }
+          def launcher = new SSHLauncher(
+            '{{ jenkins_worker_private_ip }}', 22, credentialId,
+            null, null, null, null, 60, 3, 15,
+            new NonVerifyingKeyVerificationStrategy())
+          def worker = new DumbSlave(
+            nodeName, 'Ansible-managed EC2 Docker build worker',
+            '/home/ubuntu/jenkins-agent', '1', Node.Mode.NORMAL,
+            'docker-worker', launcher, RetentionStrategy.INSTANCE, [])
+          jenkins.addNode(worker)
+          jenkins.save()
+          println "Registered ${nodeName} at {{ jenkins_worker_private_ip }}"
+      no_log: true
+    - name: Create temporary Jenkins CLI authentication file
+      ansible.builtin.copy:
+        content: "{{ jenkins_admin_user }}:{{ jenkins_admin_password }}"
+        dest: "{{ jenkins_auth_path }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+    - name: Register worker and always remove temporary authentication
+      block:
+        - name: Read worker registration script
+          ansible.builtin.slurp:
+            src: "{{ worker_registration_script }}"
+          register: groovy_script
+        - name: Get Jenkins crumb
+          ansible.builtin.uri:
+            url: http://localhost:8080/crumbIssuer/api/json
+            method: GET
+            user: "{{ jenkins_admin_user }}"
+            password: "{{ jenkins_admin_password }}"
+            force_basic_auth: yes
+            return_content: yes
+          register: crumb
+
+        - name: Show crumb
+          debug:
+            var: crumb
+        - name: Execute Groovy via Script Console
+          ansible.builtin.shell: |
+            curl -s -X POST \
+              -u "{{ jenkins_admin_user }}:{{ jenkins_admin_password }}" \
+              -H "{{ crumb.json.crumbRequestField }}: {{ crumb.json.crumb }}" \
+              -H "Cookie: {{ crumb.cookies_string }}" \
+              --data-urlencode "script@{{ worker_registration_script }}" \
+              http://localhost:8080/scriptText
+          register: worker_registration
+
+        - name: Show registration result
+          debug:
+            msg:
+              - "RC={{ worker_registration.rc }}"
+              - "STDOUT={{ worker_registration.stdout }}"
+              - "STDERR={{ worker_registration.stderr }}"
+
+        - name: Show registration result
+          ansible.builtin.debug:
+            msg:
+              - "RC={{ worker_registration.rc }}"
+              - "STDOUT={{ worker_registration.stdout }}"
+              - "STDERR={{ worker_registration.stderr }}"
+      always:
+        - name: Remove temporary Jenkins CLI authentication file
+          ansible.builtin.file:
+            path: "{{ jenkins_auth_path }}"
+            state: absent
+          no_log: true
+    - name: Remove temporary worker registration script
+      ansible.builtin.file:
+        path: "{{ worker_registration_script }}"
+        state: absent

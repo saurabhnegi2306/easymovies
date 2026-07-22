@@ -1,0 +1,97 @@
+---
+- name: Discover Jenkins controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Find the running Jenkins controller by tag
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": jenkins-ci-controller
+          instance-state-name: running
+      register: controller_info
+
+    - name: Verify exactly one Jenkins controller was found
+      ansible.builtin.assert:
+        that: controller_info.instances | length == 1
+        fail_msg: "Expected exactly one running instance tagged Name=jenkins-ci-controller."
+
+    - name: Add controller with discovered public address
+      ansible.builtin.add_host:
+        name: jenkins-controller
+        groups: jenkins_controller
+        ansible_host: "{{ controller_info.instances[0].public_ip_address }}"
+        ansible_user: ubuntu
+        ansible_ssh_private_key_file: "{{ generated_key_path }}"
+        jenkins_url: "http://{{ controller_info.instances[0].public_ip_address }}:8080"
+        jenkins_cli_url: http://localhost:8080
+
+    - name: Display discovered Jenkins URL
+      ansible.builtin.debug:
+        msg: "Discovered Jenkins URL: http://{{ controller_info.instances[0].public_ip_address }}:8080"
+
+- name: Install required Jenkins plugins
+  hosts: jenkins_controller
+  become: true
+  vars_files:
+    - vars.yml
+  vars:
+    jenkins_cli_path: /opt/jenkins-cli.jar
+    jenkins_auth_path: /root/.jenkins-cli-auth
+    jenkins_plugins:
+      - workflow-aggregator
+      - workflow-multibranch
+      - git
+      - github
+      - github-branch-source
+      - ssh-slaves
+      - docker-workflow
+      - credentials-binding
+      - ws-cleanup
+      - junit
+  tasks:
+    - name: Download Jenkins CLI from the local controller
+      ansible.builtin.get_url:
+        url: "{{ jenkins_cli_url }}/jnlpJars/jenkins-cli.jar"
+        dest: "{{ jenkins_cli_path }}"
+        mode: '0644'
+
+    - name: Create temporary Jenkins CLI authentication file
+      ansible.builtin.copy:
+        content: "{{ jenkins_admin_user }}:{{ jenkins_admin_password }}"
+        dest: "{{ jenkins_auth_path }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Install plugins and always remove temporary authentication
+      block:
+        - name: Install required plugins and their dependencies
+          ansible.builtin.command:
+            argv: "{{ ['java', '-jar', jenkins_cli_path, '-s', jenkins_cli_url, '-http', '-auth', '@' + jenkins_auth_path, 'install-plugin'] + jenkins_plugins + ['-deploy'] }}"
+          register: plugin_install
+          changed_when: plugin_install.stdout is search('Installing|Downloaded|Installing plugin')
+      always:
+        - name: Remove temporary Jenkins CLI authentication file
+          ansible.builtin.file:
+            path: "{{ jenkins_auth_path }}"
+            state: absent
+          no_log: true
+
+    - name: Restart Jenkins to load plugins
+      ansible.builtin.service:
+        name: jenkins
+        state: restarted
+
+    - name: Wait for Jenkins to accept connections
+      ansible.builtin.uri:
+        url: "{{ jenkins_cli_url }}/login"
+        status_code: 200
+      register: jenkins_ready
+      retries: 12
+      delay: 5
+      until: jenkins_ready.status == 200
