@@ -63,7 +63,7 @@ pipeline {
         stage('Run Unit Tests') {
             steps {
                 sh '''
-                    docker run --rm easymovies:${BUILD_NUMBER} pytest -v
+                    docker run --rm -w /app -e PYTHONPATH=/app easymovies:${BUILD_NUMBER} pytest -v
                 '''
             }
         }
