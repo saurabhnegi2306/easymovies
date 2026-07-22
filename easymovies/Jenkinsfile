@@ -90,7 +90,7 @@ pipeline {
                     echo "Waiting for application..."
                     sleep 10
 
-                    curl --fail http://localhost:5000
+                    curl --fail http://localhost:8081
 
                     echo "Smoke test passed."
                 '''
