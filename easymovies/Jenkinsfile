@@ -113,9 +113,9 @@ pipeline {
             echo "Cleaning up, if needed "
 
             sh '''
-                // cd easymovies
-                // docker compose down
-                // docker image prune -f
+                # cd easymovies
+                # docker compose down
+                # docker image prune -f
             '''
         }
 
