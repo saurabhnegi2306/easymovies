@@ -34,7 +34,23 @@ pipeline {
                 '''
             }
         }
+        stage('Debug Workspace') {
+            steps {
+                sh '''
+                    echo "Current directory:"
+                    pwd
 
+                    echo "Workspace contents:"
+                    ls -la
+
+                    echo "Find Dockerfile:"
+                    find . -name Dockerfile
+
+                    echo "Find Jenkinsfile:"
+                    find . -name Jenkinsfile
+                '''
+            }
+        }
         stage('Build Docker Image') {
             steps {
                 sh '''
