@@ -71,6 +71,7 @@ pipeline {
         stage('Deploy Application') {
             steps {
                 sh '''
+                    cd easymovies
                     export IMAGE_TAG=${BUILD_NUMBER}
                     export GIT_COMMIT=$(git rev-parse --short HEAD)
                     export BUILD_URL=${BUILD_URL}
@@ -112,6 +113,8 @@ pipeline {
             echo "Cleaning up..."
 
             sh '''
+            
+                cd easymovies
                 docker compose down
                 docker image prune -f
             '''
