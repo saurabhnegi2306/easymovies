@@ -20,7 +20,7 @@
 
 ---
 
-# 🛠 Prerequisites
+# 🛠 Prerequisites ( To Be Run on Lab/local VM ) 
 
 Install boto3:
 
@@ -48,7 +48,7 @@ ansible-galaxy collection install -r requirements.yml
 
 ---
 
-# 🚀 Step 1 - Provision Jenkins Infrastructure
+# 🚀 Step 1 - Provision Jenkins Infrastructure ( To Be Run on Lab/local VM ) 
 
 Run:
 
@@ -58,17 +58,16 @@ ansible-playbook -i inventory.ini 1.provision.yml
 
 This creates:
 
-- Jenkins Controller
-- Jenkins Worker
+- Jenkins Controller Node
+- Jenkins Worker Node
 - Security Group allowing:
   - SSH (22)
-  - Jenkins (8080)
-  - NodePort Range (5000-32767)
+  - Port Range (5000-32767) covering jenkisn port 8080 and all nodeports ( 30000 to 32767 ) 
 
 It also updates:
 
-- `inventory.ini`
-- `vars.yml`
+- `inventory.ini`  with details of both nodes
+- `vars.yml`      with jenkins_admin_password
 
 and generates:
 
@@ -85,37 +84,31 @@ This step should auto update the inventory.ini file with new nodes IP details as
 
 ---
 
-# 🔑 Access Jenkins
+# 🔑 Access Jenkins Nodes via CLI ( From Local Laptop Web Browser )
+
+SSH to Jenkins Controller Node:
+
+```bash
+ssh -i ~/.ssh/jenkins-ci-generated-key ubuntu@<CONTROLLER-NODE-PUBLIC-IP>
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword      # To Retrieve Jenkins UI Admin password
+systemctl status jenkins                                    # To check jenkins service status
+exit
+```
+
+SSH to Jenkins Worker Node ( If Needed ) :
+
+```bash
+ssh -i ~/.ssh/jenkins-ci-generated-key ubuntu@<WORKER-NODE-PUBLIC-IP>
+```
+
+# 🔑 Access Jenkins UI Via Browser ( From Local Laptop Web Browser )
 
 Login URL
 
 ```
 http://<CONTROLLER-NODE-PUBLIC-IP>:8080
 ```
-
-SSH:
-
-```bash
-ssh -i ~/.ssh/jenkins-ci-generated-key ubuntu@<CONTROLLER-NODE-PUBLIC-IP>
-```
-
-Worker:
-
-```bash
-ssh -i ~/.ssh/jenkins-ci-generated-key ubuntu@<WORKER-NODE-PUBLIC-IP>
-```
-
-Retrieve password:
-
-```bash
-sudo cat /var/lib/jenkins/secrets/initialAdminPassword
-```
-
-Check Jenkins:
-
-```bash
-sudo systemctl status jenkins
-```
+Enter Jenkins admin password ( get from previous step or fetch it from vars.yml ( which shoul dnow have updated password).
 
 <img width="1107" height="424" alt="image" src="https://github.com/user-attachments/assets/62b8c1ed-0ba8-4c3d-b63e-d6ea8323c6e9" />
 
@@ -128,16 +121,16 @@ Create a user or continue with admin.
 <img width="1107" height="916" alt="image" src="https://github.com/user-attachments/assets/0656bacd-4b96-4127-9f0f-e01c8b07aebc" />
 
 <img width="1107" height="407" alt="image" src="https://github.com/user-attachments/assets/c4f06743-16fd-4b72-9875-89e22b184096" />
-
+Jenkins Server is now up and running. 
 ---
 
-# 🔌 Step 2 - Install Jenkins Plugins
+# 🔌 Step 2 - Install Jenkins Plugins ( To Be Run on Lab/local VM )
 
 ```bash
 ansible-playbook -i inventory.ini 2.install_plugins.yml
 ```
 
-Plugins installed:
+This playbook will install below Plugins. Jenkins has a lot of supported plugins specific to different tools and requirements.:
 
 - workflow-aggregator
 - workflow-multibranch
@@ -152,7 +145,7 @@ Plugins installed:
 
 ---
 
-# 👷 Step 3 - Configure Jenkins Worker
+# 👷 Step 3 - Configure Jenkins Worker ( To Be Run on Lab/local VM )
 
 ```bash
 ansible-playbook -i inventory.ini 3.configure_worker.yml
@@ -166,7 +159,7 @@ Verify under **Manage Jenkins → Nodes**.
 
 ---
 
-# 🖥 Run Application Locally
+# 🖥 Run Application Locally ( To Be Run on Lab/local VM )
 
 ```bash
 pip install -r requirements.txt
@@ -189,7 +182,7 @@ Stop using CTRL+C.
 
 ---
 
-# 🐳 Docker Deployment
+# 🐳 Docker Deployment ( To Be Run on Lab/local VM )
 
 Build:
 
@@ -221,7 +214,7 @@ docker rm -f easymovies
 
 ---
 
-# 🐳 Docker Compose
+# 🐳 Docker Compose ( To Be Run on Lab/local VM )
 
 ```bash
 docker compose up -d
@@ -229,37 +222,42 @@ docker compose up -d
 
 <img width="1107" height="99" alt="image" src="https://github.com/user-attachments/assets/70a3fcb2-a5f7-419b-9a8c-cf38da02509b" />
 
-<img width="1107" height="99" alt="image" src="https://github.com/user-attachments/assets/b390a90a-eb16-49d7-b6dc-2cdec9228559" />
+Application is again available @
+```bash 
+http://<LAB-VM-PUBLIC-IP>:8081 
+```
+
+<img width="784" height="408" alt="image" src="https://github.com/user-attachments/assets/de8a6064-8d30-4311-b359-a318408aa38e" />
 
 ---
 
 # ⚙ Jenkins Pipeline
-
-Create a new **Pipeline**.
+ 
+Create a new **Pipeline**. Go to Jenkins -> New Item -> Pipeline -> Give it a Name and NEXT 
 
 <img width="1107" height="270" alt="image" src="https://github.com/user-attachments/assets/eec92272-3271-4f34-9fcc-124e7f76c197" />
 
-Enable GitHub Project.
+Enable GitHub Project and provide your public repository URI.
 
 <img width="1107" height="642" alt="image" src="https://github.com/user-attachments/assets/ba20b7ee-f6be-4636-a2fb-f33316698843" />
 
-Enable **GitHub hook trigger for GITScm Polling**.
+Enable **GitHub hook trigger for GITScm Polling** so that Jenkins pipeline is triggered as soon as you change/commit anything in your repo to create a CICD setup.
 
 <img width="1107" height="146" alt="image" src="https://github.com/user-attachments/assets/6d62b327-c956-40dc-8ac3-84f52b9a402c" />
 
-Configure SCM.
+Configure SCM and ensure to choose correct branch ( main or master or dev ) and also relative path of Jenkinsfile as compare to root directory of your repo.
 
 <img width="1107" height="741" alt="image" src="https://github.com/user-attachments/assets/83fd3cb3-55cf-47ea-a294-56c1f82d017d" />
 
 ---
 
-# 🔗 GitHub Webhook
+# 🔗 GitHub Webhook Configuration For Jenkins
 
-GitHub → Settings → Webhooks → Add Webhook
+navigate to GitHub Repo → Settings → Webhooks → Add Webhook
 
 <img width="1107" height="198" alt="image" src="https://github.com/user-attachments/assets/44ebf94a-8d38-4472-a7fb-c1f5078d34e9" />
 
-Payload:
+Payload needs to provide in below format. Also choose SSL Verification as DISABLE ( not recommended for production but OK for testing) :
 
 ```
 http://<JENKINS-CONTROLLER-NODE-PUBLIC-IP>:8080/github-webhook/
@@ -269,20 +267,20 @@ http://<JENKINS-CONTROLLER-NODE-PUBLIC-IP>:8080/github-webhook/
 
 ---
 
-# ✅ Verify CI/CD
+# ✅ Verify CI/CD From Jenkisn UI 
 
 Make a dummy change in README.md, Dockerfile or application code and push to GitHub.
 
-Jenkins should automatically trigger.
+Jenkins should automatically trigger a build else you can always run BUILD NOW to pull code from Repo and build->deploy.
 
 <img width="564" height="1020" alt="image" src="https://github.com/user-attachments/assets/85d2e8e4-80be-4a1c-9e7c-799435947ece" />
 
-Pipeline Flow:
+So the whole Pipeline Flow is :
 
 ```text
 GitHub Push
       ↓
-Webhook
+Webhook ( If setup Correctly ) 
       ↓
 Jenkins Pipeline
       ↓
@@ -294,7 +292,7 @@ Pytest
       ↓
 Deploy to Worker
       ↓
-Application
+Application ready @ port 8081
 ```
 
 Application:
@@ -302,6 +300,7 @@ Application:
 ```
 http://<JENKINS-WORKER-NODE-PUBLIC-IP>:8081
 ```
+You can see the build details at the bottom of the website, which should change after every build.
 
 <img width="1107" height="361" alt="image" src="https://github.com/user-attachments/assets/d64f1cdd-f647-4fda-a570-4af0da69d809" />
 
