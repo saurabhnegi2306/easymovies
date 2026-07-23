@@ -11,5 +11,5 @@ generated_key_path: "{{ key_directory }}/jenkins-ci-generated-key"
 deprecation_warnings: false
 
 jenkins_admin_user: admin
-jenkins_admin_password: 8572d4ddbfcd43a4883308764a68186e
+jenkins_admin_password: "b8cf468d188a404a95127ea7838cf75f"
 
