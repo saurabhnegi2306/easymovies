@@ -62,7 +62,7 @@ This creates:
 - Jenkins Worker Node
 - Security Group allowing:
   - SSH (22)
-  - Port Range (5000-32767) covering jenkisn port 8080 and all nodeports ( 30000 to 32767 ) 
+  - Port Range (5000-32767) covering jenkins port 8080 and all nodeports ( 30000 to 32767 ) 
 
 It also updates:
 
@@ -267,7 +267,7 @@ http://<JENKINS-CONTROLLER-NODE-PUBLIC-IP>:8080/github-webhook/
 
 ---
 
-# ✅ Verify CI/CD From Jenkisn UI 
+# ✅ Verify CI/CD From Jenkins UI 
 
 Make a dummy change in README.md, Dockerfile or application code and push to GitHub.
 
